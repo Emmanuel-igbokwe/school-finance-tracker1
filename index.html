@@ -167,17 +167,18 @@
     }
 
     
-    function toInt(val) {
-      if (val === null || val === undefined) return '';
-      if (typeof val === 'number') return Math.trunc(val);
-      // strings: remove commas and spaces
-      var s = String(val).trim();
-      if (!s) return '';
-      // try parse float after stripping non-numeric except . and -
-      var n = Number(s.replace(/[^0-9.\-]/g, ''));
-      if (isFinite(n)) return Math.trunc(n);
-      return val;
-    }
+   function toInt(val) {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'number') return Math.round(val);
+  var s = String(val).trim();
+  if (!s) return '';
+  // keep dates (e.g., "01/01/2025") as-is
+  if (s.indexOf('/') >= 0) return s;
+  // remove non-numeric except dot and minus, then round
+  var n = Number(s.replace(/[^0-9.\-]/g, ''));
+  if (isFinite(n)) return Math.round(n);
+  return val;
+}
 
     function updateUI() {
       const preview = document.getElementById('preview');
