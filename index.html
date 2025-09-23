@@ -63,15 +63,18 @@
     document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
     document.getElementById('exportBtn').addEventListener('click', exportToExcel);
 
-    function readCell(sheet, addr){
-      try {
-        var c = sheet && sheet[addr];
-        if (!c) return '';
-        if (typeof c.v === 'number') return toInt(c.v);
-        return toInt(c.v);
-      } catch (e) { return ''; }
-    }
-
+   function readCell(sheet, addr, asText = false) {
+  try {
+    var c = sheet && sheet[addr];
+    if (!c) return '';
+    if (asText) return String(c.v || '');  // force plain text (for school names etc.)
+    if (typeof c.v === 'number') return toInt(c.v);
+    return toInt(c.v);
+  } catch (e) { 
+    return ''; 
+  }
+}
+    
     function handleFileUpload(event) {
       const uploadedFiles = Array.from(event.target.files);
       const quarter = document.getElementById('quarter').value;
@@ -91,7 +94,7 @@
           const fiscalYear = readCell(shBalance, 'F2');
 
           const row = {
-            school: readCell(shSOA, 'I26'),
+            school: readCell(shSOA, 'I26', true),
             quarter: getSelectedQuarter(file.name),
             fiscalYear: formatDateCell(readCell(shBalance, 'F2')),
             unrestrictedCash: readCell(shBalance, 'F21'),
