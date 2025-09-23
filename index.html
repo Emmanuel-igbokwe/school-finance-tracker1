@@ -90,7 +90,7 @@
           const fiscalYear = readCell(shBalance, 'F2');
 
           const row = {
-            school: file.name.replace(/\.(xlsx|xls)$/i, ''),
+            school: readCell(wb.Sheets['Statement of Affirmation (SOA)'], 'IJK26'),
             quarter: getSelectedQuarter(file.name),
             fiscalYear: formatDateCell(readCell(shBalance, 'F2')),
             unrestrictedCash: readCell(shBalance, 'F21'),
