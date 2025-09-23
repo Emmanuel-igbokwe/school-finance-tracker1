@@ -1,264 +1,234 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>School Finance Tracker</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
-    // Clear the file chooser when quarter changes so you can upload anew per quarter
-    (function(){
-      var q = document.getElementById('quarter');
-      if (q) {
-        q.addEventListener('change', function(){
-          var f = document.getElementById('fileInput');
-          if (f) { f.value = ''; }
-        });
-      }
-    })();
-
-</script>
+  <meta charset="UTF-8">
+  <title>Nola Schools Finance Tracker — Built by Emmanuel Igbokwe</title>
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    .row { display: flex; gap: 16px; flex-wrap: wrap; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 20px; box-shadow: 2px 2px 8px #eee; }
-    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
-    th { background: #f4f4f4; }
+    h1 { text-align: center; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    #controls { text-align: center; margin-bottom: 20px; }
+    #controls select, #controls input { margin: 0 10px; }
   </style>
-</head>
-<body>
-<h1 style="text-align:center;">NOLA Schools Finance Tracker - Built by Emmanuel Igbokwe</h1>
-
-  <div class="card">
-    <h1>NOLA Schools Finance Tracker</h1>
-    <div class="row">
-      <div>
-        <label for="quarter"><strong>Select Quarter</strong></label>
-        <select id="quarter">
-          <option value="Q1">Quarter 1</option>
-          <option value="Q2">Quarter 2</option>
-          <option value="Q3">Quarter 3</option>
-          <option value="Q4">Quarter 4</option>
-        </select>
-      </div>
-      <div>
-        <label><strong>Upload Excel Template(s)</strong></label>
-        <input type="file" id="fileUpload" accept=".xlsx,.xls" multiple />
-      </div>
-      <div class="row" style="align-items:flex-end">
-        <button id="exportBtn">Export Consolidated Excel</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Preview Consolidated Data</h2>
-    <div id="preview"></div>
-  </div>
 
   <script>
-    const files = [];
-    const consolidatedData = [];
-
-    document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
-    document.getElementById('exportBtn').addEventListener('click', exportToExcel);
-
-    function readCell(sheet, addr){
-      try {
-        var c = sheet && sheet[addr];
-        if (!c) return '';
-        if (typeof c.v === 'number') return toInt(c.v);
-        return toInt(c.v);
-      } catch (e) { return ''; }
+    // --- Rounding + Formatting Helpers ---
+    function toInt(val) {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'number') return Math.round(val);
+      var s = String(val).trim();
+      if (!s) return '';
+      if (s.indexOf('/') >= 0) return s; // keep date strings
+      var n = Number(s.replace(/[^0-9.\-]/g, ''));
+      return isFinite(n) ? Math.round(n) : s;
     }
 
-    function handleFileUpload(event) {
-      const uploadedFiles = Array.from(event.target.files);
-      const quarter = document.getElementById('quarter').value;
+    function v(x) {
+      return (x === null || x === undefined || x === '') ? '' : toInt(x);
+    }
 
-      uploadedFiles.forEach((file) => {
-        files.push({ name: file.name, quarter });
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const wb = XLSX.read(e.target.result, { type: 'binary' });
+    const MONEY_FIELDS = new Set([
+      'restrictedCash','unrestrictedCash','currentAssets','fixedAssets','totalAssets',
+      'currentLiabilities','longTermLiabilities','totalLiabilities',
+      'unrestrictedFB','restrictedFB','totalFB','totalExpenditures',
+      'depreciation','accumulatedDepreciation',
+      'totalLocalRevenue','totalStateRevenue','totalFederalRevenue','totalRevenue',
+      'totalSalaries','totalEmployeeBenefit','totalProfessionalPurchased',
+      'totalPurchasedProperty','totalOtherPurchased','totalSupplies',
+      'totalProperty','totalOtherObjects','totalOtherUsesOfFund'
+    ]);
 
-          // Sheets
-          const shBalance = wb.Sheets['Balance Sheet'];
-          const shCash = wb.Sheets['Cash Flow Statement'];
-          const shRev = wb.Sheets['Revenues and Exp'];
+    function vField(key, val) {
+      const coerced = v(val);
+      if (!MONEY_FIELDS.has(key)) return coerced;
+      const num = Number(coerced);
+      return Number.isFinite(num)
+        ? '$' + num.toLocaleString('en-US', { maximumFractionDigits: 0 })
+        : coerced;
+    }
 
-          const fiscalYear = readCell(shBalance, 'F2');
+    // --- Consolidated Data Storage ---
+    let consolidatedData = [];
 
-          const row = {
-            school: file.name.replace(/\.(xlsx|xls)$/i, ''),
-            quarter: getSelectedQuarter(file.name),
-            fiscalYear: formatDateCell(readCell(shBalance, 'F2')),
-            unrestrictedCash: readCell(shBalance, 'F21'),
-            restrictedCash: readCell(shBalance, 'F32'),
-            currentAssets: readCell(shBalance, 'F45'),
-            fixedAssets: readCell(shBalance, 'F56'),
-            totalAssets: readCell(shBalance, 'F57'),
-            currentLiabilities: readCell(shBalance, 'F75'),
-            longTermLiabilities: readCell(shBalance, 'F83'),
-            totalLiabilities: readCell(shBalance, 'F84'),
-            restrictedFB: readCell(shBalance, 'F87'),
-            unrestrictedFB: readCell(shBalance, 'F88'),
-            totalFB: readCell(shBalance, 'F89'),
-            totalExpenditures: readCell(shRev, 'I145'),
-            depreciation: readCell(shCash, 'E16'),
-            accumulatedDepreciation: readCell(shBalance, 'F55'),
-            totalLocalRevenue: readCell(shRev, 'I23'),
-            totalStateRevenue: readCell(shRev, 'I39'),
-            totalFederalRevenue: readCell(shRev, 'I75'),
-            totalRevenue: readCell(shRev, 'I77'),
-            totalSalaries: readCell(shRev, 'I90'),
-            totalEmployeeBenefit: readCell(shRev, 'I99'),
-            totalProfessionalPurchased: readCell(shRev, 'I105'),
-            totalPurchasedProperty: readCell(shRev, 'I112'),
-            totalOtherPurchased: readCell(shRev, 'I119'),
-            totalSupplies: readCell(shRev, 'I126'),
-            totalProperty: readCell(shRev, 'I132'),
-            totalOtherObjects: readCell(shRev, 'I138'),
-            totalOtherUsesOfFund: readCell(shRev, 'I143'),
-          };
+    // --- File Upload + Parsing ---
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
 
-          consolidatedData.push(row);
-          updateUI();
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+        // Map of Excel cells to object keys
+        const r = {
+          school: "School Name", // replace with actual lookup if needed
+          quarter: document.getElementById('quarter').value,
+          fiscalYear: XLSX.utils.sheet_to_json(sheet, { header: 1 })[1][5], // F2 cell
+          restrictedCash: sheet["F21"]?.v,
+          unrestrictedCash: sheet["F32"]?.v,
+          currentAssets: sheet["F45"]?.v,
+          fixedAssets: sheet["F55"]?.v,
+          accumulatedDepreciation: sheet["F55"]?.v,
+          totalAssets: sheet["F60"]?.v,
+          currentLiabilities: sheet["F70"]?.v,
+          longTermLiabilities: sheet["F80"]?.v,
+          totalLiabilities: sheet["F85"]?.v,
+          unrestrictedFB: sheet["F86"]?.v,
+          restrictedFB: sheet["F87"]?.v,
+          totalFB: sheet["F88"]?.v,
+          totalExpenditures: sheet["F89"]?.v,
+          depreciation: sheet["F54"]?.v,
+          totalLocalRevenue: sheet["I23"]?.v,
+          totalStateRevenue: sheet["I39"]?.v,
+          totalFederalRevenue: sheet["I75"]?.v,
+          totalRevenue: sheet["I80"]?.v,
+          totalSalaries: sheet["I90"]?.v,
+          totalEmployeeBenefit: sheet["I99"]?.v,
+          totalProfessionalPurchased: sheet["I105"]?.v,
+          totalPurchasedProperty: sheet["I112"]?.v,
+          totalOtherPurchased: sheet["I119"]?.v,
+          totalSupplies: sheet["I126"]?.v,
+          totalProperty: sheet["I132"]?.v,
+          totalOtherObjects: sheet["I138"]?.v,
+          totalOtherUsesOfFund: sheet["I143"]?.v
         };
-        reader.readAsBinaryString(file);
-      });
+
+        consolidatedData.push(r);
+        updateUI();
+        e.target.value = ""; // reset file input for multiple uploads
+      };
+      reader.readAsArrayBuffer(file);
     }
 
-    
-    function formatDateCell(val) {
-      if (!val) return '';
-      if (typeof val === 'number') {
-        const epoch = new Date(Date.UTC(1899, 11, 30));
-        const d = new Date(epoch.getTime() + val * 86400000);
-        return (d.getMonth()+1).toString().padStart(2,'0') + '/' +
-               d.getDate().toString().padStart(2,'0') + '/' +
-               d.getFullYear();
-      }
-      const d = new Date(val);
-      if (!isNaN(d)) {
-        return (d.getMonth()+1).toString().padStart(2,'0') + '/' +
-               d.getDate().toString().padStart(2,'0') + '/' +
-               d.getFullYear();
-      }
-      return val;
-    }
-
-    
-    function detectQuarterFromFilename(name) {
-      if (!name) return '';
-      var n = String(name).toUpperCase();
-      if (n.includes('Q1')) return 'Q1';
-      if (n.includes('Q2')) return 'Q2';
-      if (n.includes('Q3')) return 'Q3';
-      return '';
-    }
-    
-    
-    function getSelectedQuarter(fileName) {
-      var pick = document.getElementById('quarter');
-      var fromDrop = pick ? (pick.value || '') : '';
-      var fromName = detectQuarterFromFilename(fileName);
-      return fromDrop || fromName || '';
-    }
-
-    
-   function toInt(val) {
-  if (val === null || val === undefined) return '';
-  if (typeof val === 'number') return Math.round(val);
-  var s = String(val).trim();
-  if (!s) return '';
-  // keep dates (e.g., "01/01/2025") as-is
-  if (s.indexOf('/') >= 0) return s;
-  // remove non-numeric except dot and minus, then round
-  var n = Number(s.replace(/[^0-9.\-]/g, ''));
-  if (isFinite(n)) return Math.round(n);
-  return val;
-}
-
+    // --- Update Preview Table ---
     function updateUI() {
-      const preview = document.getElementById('preview');
-      if (!consolidatedData.length) { preview.innerHTML=''; return; }
+      const table = document.getElementById('preview');
+      table.innerHTML = "";
 
-      const v = (x) => (x === undefined || x === null ? '' : x);
+      if (!consolidatedData.length) return;
 
-      let table = '<table><tr>' +
-        '<th>School</th><th>Quarter</th><th>Fiscal Year</th>' +
-        '<th>Restricted Cash</th><th>Unrestricted Cash</th>' +
-        '<th>Total Current Assets</th><th>Fixed Assets</th><th>Total Assets</th>' +
-        '<th>Current Liabilities</th><th>Long Term Liabilities</th><th>Total Liabilities</th>' +
-        '<th>Unrestricted Fund Balance</th><th>Restricted Fund Balance</th><th>Total Fund Balance</th>' +
-        '<th>Total Expenditures</th>' +
-        '<th>Depreciation</th><th>Accumulated Depreciation</th>' +
-        '<th>Total Local Revenue</th><th>Total State Revenue</th><th>Total Federal Revenue</th>' +
-        '<th>Total Revenue</th>' +
-        '<th>Total Salaries</th><th>Total Employee Benefit</th>' +
-        '<th>Total Professional Purchased</th><th>Total Purchased Property</th>' +
-        '<th>Total Other Purchased</th><th>Total Supplies</th><th>Total Property</th>' +
-        '<th>Total Other Objects</th><th>Total Other Uses of Fund</th>' +
-      '</tr>';
-
-      consolidatedData.forEach(function(r){
-        table += '<tr>' +
-          '<td>' + v(r.school) + '</td>' +
-          '<td>' + v(r.quarter) + '</td>' +
-          '<td>' + v(r.fiscalYear) + '</td>' +
-          '<td>' + v(r.restrictedCash) + '</td>' +
-          '<td>' + v(r.unrestrictedCash) + '</td>' +
-          '<td>' + v(r.currentAssets) + '</td>' +
-          '<td>' + v(r.fixedAssets) + '</td>' +
-          '<td>' + v(r.totalAssets) + '</td>' +
-          '<td>' + v(r.currentLiabilities) + '</td>' +
-          '<td>' + v(r.longTermLiabilities) + '</td>' +
-          '<td>' + v(r.totalLiabilities) + '</td>' +
-          '<td>' + v(r.unrestrictedFB) + '</td>' +
-          '<td>' + v(r.restrictedFB) + '</td>' +
-          '<td>' + v(r.totalFB) + '</td>' +
-          '<td>' + v(r.totalExpenditures) + '</td>' +
-          '<td>' + v(r.depreciation) + '</td>' +
-          '<td>' + v(r.accumulatedDepreciation) + '</td>' +
-          '<td>' + v(r.totalLocalRevenue) + '</td>' +
-          '<td>' + v(r.totalStateRevenue) + '</td>' +
-          '<td>' + v(r.totalFederalRevenue) + '</td>' +
-          '<td>' + v(r.totalRevenue) + '</td>' +
-          '<td>' + v(r.totalSalaries) + '</td>' +
-          '<td>' + v(r.totalEmployeeBenefit) + '</td>' +
-          '<td>' + v(r.totalProfessionalPurchased) + '</td>' +
-          '<td>' + v(r.totalPurchasedProperty) + '</td>' +
-          '<td>' + v(r.totalOtherPurchased) + '</td>' +
-          '<td>' + v(r.totalSupplies) + '</td>' +
-          '<td>' + v(r.totalProperty) + '</td>' +
-          '<td>' + v(r.totalOtherObjects) + '</td>' +
-          '<td>' + v(r.totalOtherUsesOfFund) + '</td>' +
-        '</tr>';
+      const headerRow = document.createElement("tr");
+      const headers = [
+        'School','Quarter','Fiscal Year',
+        'Restricted Cash','Unrestricted Cash',
+        'Total Current Assets','Fixed Assets','Total Assets',
+        'Current Liabilities','Long Term Liabilities','Total Liabilities',
+        'Unrestricted Fund Balance','Restricted Fund Balance','Total Fund Balance',
+        'Total Expenditures',
+        'Depreciation','Accumulated Depreciation',
+        'Total Local Revenue','Total State Revenue','Total Federal Revenue','Total Revenue',
+        'Total Salaries','Total Employee Benefit','Total Professional Purchased',
+        'Total Purchased Property','Total Other Purchased','Total Supplies',
+        'Total Property','Total Other Objects','Total Other Uses of Fund'
+      ];
+      headers.forEach(h => {
+        const th = document.createElement("th");
+        th.textContent = h;
+        headerRow.appendChild(th);
       });
-      preview.innerHTML = table;
+      table.appendChild(headerRow);
+
+      consolidatedData.forEach(r => {
+        const tr = document.createElement("tr");
+        const keys = [
+          'school','quarter','fiscalYear',
+          'restrictedCash','unrestrictedCash',
+          'currentAssets','fixedAssets','totalAssets',
+          'currentLiabilities','longTermLiabilities','totalLiabilities',
+          'unrestrictedFB','restrictedFB','totalFB',
+          'totalExpenditures',
+          'depreciation','accumulatedDepreciation',
+          'totalLocalRevenue','totalStateRevenue','totalFederalRevenue','totalRevenue',
+          'totalSalaries','totalEmployeeBenefit','totalProfessionalPurchased',
+          'totalPurchasedProperty','totalOtherPurchased','totalSupplies',
+          'totalProperty','totalOtherObjects','totalOtherUsesOfFund'
+        ];
+        keys.forEach(k => {
+          const td = document.createElement("td");
+          td.textContent = vField(k, r[k]);
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
     }
 
-    function exportToExcel() {
-      if (!consolidatedData.length) return alert('No data to export');
-      const ws = XLSX.utils.json_to_sheet(consolidatedData.map(function(r){ var o={}; for (var k in r){ o[k] = toInt(r[k]); } return o; }));
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Consolidated');
-      XLSX.writeFile(wb, 'School_Finance_Tracking.xlsx');
-    }
+    // --- Export to Excel ---
+    document.addEventListener("DOMContentLoaded", function () {
+      document.getElementById('btnExport').addEventListener('click', function () {
+        if (!consolidatedData.length) {
+          alert('No data to export');
+          return;
+        }
+
+        const headers = [
+          'School','Quarter','Fiscal Year',
+          'Restricted Cash','Unrestricted Cash',
+          'Total Current Assets','Fixed Assets','Total Assets',
+          'Current Liabilities','Long Term Liabilities','Total Liabilities',
+          'Unrestricted Fund Balance','Restricted Fund Balance','Total Fund Balance',
+          'Total Expenditures',
+          'Depreciation','Accumulated Depreciation',
+          'Total Local Revenue','Total State Revenue','Total Federal Revenue','Total Revenue',
+          'Total Salaries','Total Employee Benefit','Total Professional Purchased',
+          'Total Purchased Property','Total Other Purchased','Total Supplies',
+          'Total Property','Total Other Objects','Total Other Uses of Fund'
+        ];
+
+        const keys = [
+          'school','quarter','fiscalYear',
+          'restrictedCash','unrestrictedCash',
+          'currentAssets','fixedAssets','totalAssets',
+          'currentLiabilities','longTermLiabilities','totalLiabilities',
+          'unrestrictedFB','restrictedFB','totalFB',
+          'totalExpenditures',
+          'depreciation','accumulatedDepreciation',
+          'totalLocalRevenue','totalStateRevenue','totalFederalRevenue','totalRevenue',
+          'totalSalaries','totalEmployeeBenefit','totalProfessionalPurchased',
+          'totalPurchasedProperty','totalOtherPurchased','totalSupplies',
+          'totalProperty','totalOtherObjects','totalOtherUsesOfFund'
+        ];
+
+        const rows = consolidatedData.map(r =>
+          keys.map(k => vField(k, r[k]))
+        );
+        const aoa = [headers, ...rows];
+
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = headers.map(() => ({ wch: 18 }));
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Consolidated');
+
+        const now = new Date();
+        const ts = (now.getMonth()+1).toString().padStart(2,'0') + '-' +
+                   now.getDate().toString().padStart(2,'0') + '-' +
+                   now.getFullYear() + '_' +
+                   now.getHours().toString().padStart(2,'0') + now.getMinutes().toString().padStart(2,'0');
+        XLSX.writeFile(wb, `Nola_School_Finance_Tracking_${ts}.xlsx`);
+      });
+    });
   </script>
+</head>
+<body>
+  <h1>Nola School Finance Tracker — Built by Emmanuel Igbokwe</h1>
 
-<script>
-  (function(){
-    var q = document.getElementById('quarter');
-    if (q) {
-      q.addEventListener('change', function(){
-        var f = document.getElementById('fileUpload');
-        if (f) f.value = '';
-      });
-    }
-  })();
-</script>
+  <div id="controls">
+    <label for="quarter">Select Quarter:</label>
+    <select id="quarter">
+      <option value="Q1">Q1</option>
+      <option value="Q2">Q2</option>
+      <option value="Q3">Q3</option>
+      <option value="Q4">Q4</option>
+    </select>
+    <input type="file" id="file" accept=".xlsx, .xls" onchange="handleFile(event)">
+    <button id="btnExport">Export Consolidated</button>
+  </div>
 
+  <table id="preview"></table>
 </body>
-</html>
+</html> 
