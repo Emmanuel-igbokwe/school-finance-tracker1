@@ -83,6 +83,7 @@
           const wb = XLSX.read(e.target.result, { type: 'binary' });
 
           // Sheets
+          const shSOA     = wb.Sheets['Statement of Affirmation (SOA)'];
           const shBalance = wb.Sheets['Balance Sheet'];
           const shCash = wb.Sheets['Cash Flow Statement'];
           const shRev = wb.Sheets['Revenues and Exp'];
@@ -90,7 +91,7 @@
           const fiscalYear = readCell(shBalance, 'F2');
 
           const row = {
-            school: readCell(wb.Sheets['Statement of Affirmation (SOA)'], 'IJK26'),
+            school: readCell(shSOA, 'I26'),
             quarter: getSelectedQuarter(file.name),
             fiscalYear: formatDateCell(readCell(shBalance, 'F2')),
             unrestrictedCash: readCell(shBalance, 'F21'),
